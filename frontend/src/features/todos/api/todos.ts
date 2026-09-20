@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
+import type { Tag } from "./tags";
 
 export interface Todo {
   id: string;
@@ -11,36 +12,62 @@ export interface Todo {
   user_id: string;
   created_at: string;
   updated_at: string;
+  user_email?: string | null;
+  tags?: Tag[];
 }
 
-interface TodoListResponse {
+export interface TodoListResponse {
   items: Todo[];
   total: number;
   page: number;
   size: number;
 }
 
-interface CreateTodoRequest {
+export interface TodoFilters {
+  status?: string;
+  tag_id?: string;
+  keyword?: string;
+  date_from?: string;
+  date_to?: string;
+  page?: number;
+  size?: number;
+}
+
+export interface CreateTodoRequest {
   title: string;
   description?: string;
 }
 
-interface UpdateTodoRequest {
+export interface UpdateTodoRequest {
   title?: string;
   description?: string;
   completed?: boolean;
 }
 
+export function useTodos(filters: TodoFilters = {}) {
+  const {
+    page = 1,
+    size = 20,
+    status,
+    tag_id,
+    keyword,
+    date_from,
+    date_to,
+  } = filters;
 
-export function useTodos(page: number = 1, size: number = 10000) {
   return useQuery({
-    // Bug #10 fix: include page & size in queryKey so React Query correctly
-    // refetches when pagination params change (previously ["todos"] was shared
-    // across all pages causing stale cache to be shown on page changes).
-    queryKey: ["todos", page, size],
+    queryKey: ["todos", { page, size, status, tag_id, keyword, date_from, date_to }],
     queryFn: async (): Promise<TodoListResponse> => {
       const response = await api.get("/todos", {
-        params: { page, size },
+        params: {
+          page,
+          size,
+          ...(status && { status }),
+          ...(tag_id && { tag_id }),
+          ...(keyword && { keyword }),
+          ...(date_from && { date_from }),
+          ...(date_to && { date_to }),
+        },
       });
       return response.data;
     },
@@ -63,7 +90,6 @@ export function useCreateTodo() {
   });
 }
 
-
 export function useUpdateTodo() {
   return useMutation({
     mutationFn: async ({
@@ -77,13 +103,9 @@ export function useUpdateTodo() {
       return response.data;
     },
     onMutate: async ({ id, data }) => {
-      // Cancel outgoing queries — prefix match covers ["todos", page, size]
       await queryClient.cancelQueries({ queryKey: ["todos"] });
-
-      // Snapshot previous value (optimistic update uses first cached page)
       const previousTodos = queryClient.getQueryData<TodoListResponse>(["todos"]);
 
-      // Optimistically update the cached list
       if (previousTodos) {
         queryClient.setQueryData<TodoListResponse>(["todos"], {
           ...previousTodos,
@@ -99,7 +121,6 @@ export function useUpdateTodo() {
       toast.error("Failed to update todo");
     },
     onSettled: () => {
-      // Invalidate all todos queries (prefix match)
       queryClient.invalidateQueries({ queryKey: ["todos"] });
     },
   });
